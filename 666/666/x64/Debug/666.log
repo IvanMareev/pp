@@ -1,0 +1,16 @@
+﻿  666.cpp
+C:\Users\User\source\repos\666\666\666.cpp(52,20): warning C4267: return: преобразование из "size_t" в "unsigned int"; возможна потеря данных
+C:\Users\User\source\repos\666\666\666.cpp(65,22): warning C4267: =: преобразование из "size_t" в "_Ty"; возможна потеря данных
+C:\Users\User\source\repos\666\666\666.cpp(65,22): warning C4267:         with
+C:\Users\User\source\repos\666\666\666.cpp(65,22): warning C4267:         [
+C:\Users\User\source\repos\666\666\666.cpp(65,22): warning C4267:             _Ty=unsigned int
+C:\Users\User\source\repos\666\666\666.cpp(65,22): warning C4267:         ]
+C:\Users\User\source\repos\666\666\666.cpp(168,22): warning C4267: инициализация: преобразование из "size_t" в "unsigned int"; возможна потеря данных
+C:\Users\User\source\repos\666\666\666.cpp(194,22): warning C4267: инициализация: преобразование из "size_t" в "unsigned int"; возможна потеря данных
+C:\Users\User\source\repos\666\666\666.cpp(248,22): warning C4267: инициализация: преобразование из "size_t" в "unsigned int"; возможна потеря данных
+C:\Users\User\source\repos\666\666\666.cpp(297,16): warning C4267: =: преобразование из "size_t" в "_Ty"; возможна потеря данных
+C:\Users\User\source\repos\666\666\666.cpp(297,16): warning C4267:         with
+C:\Users\User\source\repos\666\666\666.cpp(297,16): warning C4267:         [
+C:\Users\User\source\repos\666\666\666.cpp(297,16): warning C4267:             _Ty=unsigned int
+C:\Users\User\source\repos\666\666\666.cpp(297,16): warning C4267:         ]
+  666.vcxproj -> C:\Users\User\source\repos\666\x64\Debug\666.exe
