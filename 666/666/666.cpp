@@ -1,38 +1,4 @@
-Skip to content
-Navigation Menu
-RmichFF
-parallel_lab
-
-Type / to search
-Code
-Issues
-Pull requests
-Actions
-Projects
-Security
-Insights
-Breadcrumbsparallel_lab/lab2
-/aphine.cpp
-Go to file
-t
-Latest commit
-RmichFF
-RmichFF
-Add files via upload
-38d3a83
- · 
-3 minutes ago
-History
-Breadcrumbsparallel_lab/lab2
-/aphine.cpp
-File metadata and controls
-
-Code
-
-Blame
-224 lines (177 loc) · 5.53 KB
-double randomize(unsigned* V, size_t n, unsigned x0, unsigned x_min, unsigned x_max) {
-﻿#include <iostream>
+#include <iostream>
 #include <concepts>
 #include <type_traits>
 #include <memory>
@@ -256,4 +222,3 @@ int main(int argc, char* argv[])
     
     return 0;
 }
-parallel_lab/lab2/aphine.cpp at main · RmichFF/parallel_lab
