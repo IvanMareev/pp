@@ -1,197 +1,209 @@
+Skip to content
+Navigation Menu
+RmichFF
+parallel_lab
+
+Type / to search
+Code
+Issues
+Pull requests
+Actions
+Projects
+Security
+Insights
+Breadcrumbsparallel_lab/lab2
+/aphine.cpp
+Go to file
+t
+Latest commit
+RmichFF
+RmichFF
+Add files via upload
+38d3a83
+ · 
+3 minutes ago
+History
+Breadcrumbsparallel_lab/lab2
+/aphine.cpp
+File metadata and controls
+
+Code
+
+Blame
+224 lines (177 loc) · 5.53 KB
+double randomize(unsigned* V, size_t n, unsigned x0, unsigned x_min, unsigned x_max) {
 ﻿#include <iostream>
-#include <fstream>
+#include <concepts>
+#include <type_traits>
+#include <memory>
 #include <vector>
 #include <thread>
+#include <chrono>
 #include <mutex>
-#include <filesystem> 
-#include <condition_variable>
-#include "thread_utils.h"
+#include <iomanip> // Для std::setw
+#include <fstream>
 
-#define N (1u << 27)
-#define CACHE_LINE 64
-#define METHOD_ENTRY(method) {method, #method}
 
-struct partial_sum_t {
-    alignas(CACHE_LINE) unsigned val;
-};
+
+static unsigned g_num_threads = std::thread::hardware_concurrency();
 
 struct table_row {
-    bool match; 
-    double time; 
-    double speedup;
-    double efficiency;
+    unsigned average; double time, speedup;
 };
 
-class barrier {
-    std::condition_variable cv;
-    std::mutex mtx;
-    bool generation = false;
-    unsigned T;
-    const unsigned T0;
+#if !defined (__cplusplus) || __cplusplus < 20200000
+typedef double (*rand_ptr) (unsigned* V, size_t n, unsigned x0, unsigned x_min, unsigned x_max);
+#else 
+template <class F> //#include type_traits
+concept sum_callable = std::is_invocable_r<unsigned, F, const unsigned*, size_t>;
+#endif
 
-public:
-    barrier(unsigned threads) : T(threads), T0(threads) {}
-
-    void arrive_and_wait() {
-        std::unique_lock<std::mutex> l(mtx);
-        if (--T == 0) {
-            T = T0;
-            generation = !generation;
-            cv.notify_all();
-        } else {
-            bool my_barrier = generation;
-            cv.wait(l, [&] { return my_barrier != generation; });
-        }
-    }
+void set_num_threads(unsigned T) {
+    g_num_threads = T;
 };
 
+unsigned get_num_threads() {
+    return g_num_threads;
+};
 
-typedef unsigned (*sum_ptr)(const unsigned* v, size_t n);
+std::vector<table_row> run_experiment(rand_ptr rand) {
 
-unsigned expected_sum(unsigned T, size_t n) {
-    return (n * T) + (n * (n - 1)) / 2;
-}
-
-std::vector<table_row> run_experiment(sum_ptr sum) {
-    unsigned P = get_num_threads(); 
-    std::vector<table_row> table(P, { false, 0.0, 0.0, 0.0 });
-    size_t n = N;
+    unsigned P = get_num_threads();
+    std::vector<table_row> table(P);
+    size_t n = 1 << 27;
     auto V = std::make_unique<unsigned[]>(n);
 
     for (unsigned T = 1; T <= P; ++T) {
-        set_num_threads_auto(); 
-
-        for (size_t i = 0; i < n; ++i)
-            V[i] = i + T;
-
+        set_num_threads(T);
         auto t1 = std::chrono::steady_clock::now();
-        table[T - 1].match = (sum(V.get(), n) == expected_sum(T, n));
+        table[T - 1].average = rand(V.get(), n, 3, 1000, 3000) / n;
         auto t2 = std::chrono::steady_clock::now();
-
-        table[T - 1].time = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000.0;
-
-        if (T > 1) {
-            table[T - 1].speedup = table[0].time / table[T - 1].time;
-            table[T - 1].efficiency = table[T - 1].speedup / T;
-        }
-        else {
-            table[T - 1].speedup = 1.0;
-            table[T - 1].efficiency = 1.0;
-        }
+        table[T - 1].time = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+        table[T - 1].speedup = table[0].time / table[T - 1].time;
     }
 
     return table;
 }
 
-unsigned sum(const unsigned* v, size_t n) { 
-    unsigned sum = 0;
-    for (int i = 0; i < n; i++)
-        sum += v[i];
-    return sum;
-}
 
-unsigned sum_omp_reduce(const unsigned* v, size_t n) { 
-    unsigned sum = 0;
-#pragma omp parallel for reduction(+ : sum)
-    for (int i = 0; i < static_cast<int>(n); i++) 
-        sum += v[i];
-    return sum;
-}
 
-unsigned sum_round_robin(const unsigned* v, size_t n) { 
-    unsigned sum = 0;
-    unsigned T = 0;
-    unsigned* partial_sums = nullptr;
 
-#pragma omp parallel
+template <class T>
+concept monoid = requires(T x) { T(); x *= x; };
+
+template <monoid T, std::unsigned_integral U>
+T powm(T x, U e)
+{
+    auto r = T();
+
+    while (e > 0)
     {
-        T = omp_get_num_threads();
-        unsigned t = omp_get_thread_num();
-#pragma omp single
-        {
-            partial_sums = (unsigned*)calloc(T, sizeof(unsigned));
-        }
+        if (e & 1)
+            r *= x;
+        x *= x;
 
-        for (unsigned i = t; i < n; i += T)
-            partial_sums[t] += v[i];
+        e >>= 1;
     }
 
-    for (unsigned i = 0; i < T; ++i)
-        sum += partial_sums[i];
-    free(partial_sums);
-    return sum;
+    return r;
 }
 
-unsigned sum_round_robin_aligned(const unsigned* v, size_t n) { 
-    unsigned sum = 0;
-    partial_sum_t* partial_sums;
-    unsigned T;
-#pragma omp parallel
-    {
-        unsigned t = omp_get_thread_num();
-#pragma omp single
-        {
-            T = omp_get_num_threads();
-            partial_sums = (partial_sum_t*)calloc(sizeof partial_sums[0], T);
-        }
+template <class T = unsigned>
+class affine_monoid {
+    T m_a = 1, m_b = 0;
 
-        for (unsigned i = t; i < n; i += T)
-            partial_sums[t].val += v[i];
+public:
+    affine_monoid() = default;
+    affine_monoid(T a, T b): m_a(a), m_b(b) {}
+    affine_monoid& operator *= (const affine_monoid& r) {
+        m_b += m_a * r.m_b;
+        m_a *= r.m_a;
+        return *this;
+    }
+    T operator()(T x) const {
+        return m_a * x + m_b;
+    }
+};
+
+template <class T = unsigned>
+class multiplicative_monoid {
+    T x = T{1};
+
+public:
+    multiplicative_monoid() = default;
+    explicit multiplicative_monoid(T val) : x(val) {}
+    multiplicative_monoid& operator *= (const multiplicative_monoid& right) {
+        x *= right.x;
+        return *this;
     }
 
-    for (unsigned i = 0; i < T; i++)
-        sum += partial_sums[i].val;
-    free(partial_sums);
-    return sum;
-}
+    explicit operator T() const {
+        return x;
+    }
+};
 
-unsigned sum_seq(const unsigned* v, size_t n) { 
-    unsigned sum = 0;
-    for (size_t i = 0; i < n; ++i)
-        sum += v[i];
-    return sum;
-}
+template <class T = unsigned>
+class additive_monoid {
+    T x = T{0};
 
-unsigned vector_sum_la(const unsigned* v, size_t n) { 
-    unsigned T;
-    unsigned sum = 0;
-    partial_sum_t* partial_sums;
-#pragma omp parallel
-    {
-        unsigned t = omp_get_thread_num();
-#pragma omp single
-        {
-            T = omp_get_num_threads();
-            partial_sums = (partial_sum_t*)malloc(sizeof partial_sums[0] * T);
-        }
-        partial_sums[t].val = 0;
-        unsigned s_t = n / T, b_t = n % T;
-
-        if (t <= b_t)
-            b_t = ++s_t * t;
-        else
-            b_t += s_t * t;
-
-        unsigned e_t = b_t + s_t;
-
-        for (unsigned i = b_t; i < e_t; i++)
-            partial_sums[t].val += v[i];
+public:
+    additive_monoid() = default;
+    explicit additive_monoid(T val) : x(val) {}
+    additive_monoid& operator *= (const additive_monoid& right) {
+        x += right.x;
+        return *this;
     }
 
-    for (unsigned i = 0; i < T; i++)
-        sum += partial_sums[i].val;
-    free(partial_sums);
-    return sum;
+    explicit operator T() const {
+        return x;
+    }
+};
+
+// void randomize (unsigned* V, size_t n, unsigned x0, unsigned x_min, unsigned x_max)
+// V[i] <- (A, b)^i  *  (x[0]) = [xmin xmax]
+// ранд-р x[i+1] = (A * x[i]) mod c
+// рандомизатор A = 0x8088405 (134775813), b = 1, c = 2^32 (4294967296) unsigned
+// линейный конгруентный генератор 
+// Пар. участок:
+// [beg, e) = subvector(t, T, n)
+// affine_monoid m{A, b}
+// m = pow(m, beg)  ((было b если че))
+// for any i in [beg, e)
+//   x <- my_m(x[0])
+//   V <- r(x)
+//   my_m *= m
+
+unsigned range(unsigned x, unsigned xmin, unsigned xmax) {
+    return xmin + (x % (xmax - xmin));
 }
 
-unsigned sum_spp_cs(const unsigned* v, size_t n) { 
-    unsigned sum = 0;
+void seq_rand(unsigned* V, size_t n, unsigned x0, unsigned x_min, unsigned x_max) {
+    const unsigned A = 0x8088405;
+    const unsigned b = 1;
+    const unsigned long long c = 4294967296;
+    unsigned x = x0;
+    V[0] = x0;
+    for (size_t i = 1; i < n; i++) {
+        x = (A * x + b) % c;
+        V[i] = range(x,x_min, x_max);
+    }
+}
+
+double randomize(unsigned* V, size_t n, unsigned x0, unsigned x_min, unsigned x_max) {
+    const unsigned A = 0x8088405;
+    const unsigned b = 1;
+    const unsigned long long c = 4294967296;
+
+    double sum = 0;
+
     unsigned T = get_num_threads();
     std::vector<std::thread> workers(T - 1);
     std::mutex mtx;
 
-    auto worker_proc = [&v, &sum, &mtx, n, T](unsigned t) {
+    auto subvector = [T, V, n, x0, x_min, x_max, &mtx, A, b, &sum](unsigned t) {
+        unsigned x;
         unsigned s_t = n / T, b_t = n % T;
+        affine_monoid m( A, b );
 
         if (t < b_t)
             b_t = ++s_t * t;
@@ -200,9 +212,17 @@ unsigned sum_spp_cs(const unsigned* v, size_t n) {
 
         unsigned e_t = b_t + s_t;
 
-        unsigned my_sum = 0;
-        for (unsigned i = b_t; i < e_t; ++i)
-            my_sum += v[i];
+        double my_sum = 0;
+
+        affine_monoid my_m = powm(m, b_t);
+
+        for (size_t i = b_t; i < e_t; i++)
+        {
+            x = my_m(x0) % c;
+            V[i] = range(x, x_min, x_max);
+            my_m *= m;
+            my_sum += V[i];
+        }
 
         {
             std::scoped_lock lock(mtx);
@@ -210,67 +230,9 @@ unsigned sum_spp_cs(const unsigned* v, size_t n) {
         }
     };
 
-    for (unsigned t = 1; t < T; ++t)
-        workers[t - 1] = std::thread(worker_proc, t);
-
-    worker_proc(0);
-
-    for (auto& worker : workers)
-        worker.join();
-
-    return sum;
-}
-
-unsigned sum_mutex(const unsigned* v, size_t n) {
-    unsigned sum = 0;
-#pragma omp parallel
-    {
-        unsigned my_sum = 0;
-#pragma omp for
-        for (int i = 0; i < static_cast<int>(n); i++) {
-            my_sum += v[i];
-        }
-
-#pragma omp critical
-        sum += my_sum;
-    }
-    return sum;
-}
-
-unsigned sum_barrier(const unsigned* v, size_t n) { 
-    unsigned sum = 0;
-    unsigned T = get_num_threads();
-    barrier sync_barrier(T);
-
-    std::vector<std::thread> workers(T - 1);
-
-    auto worker_proc = [&v, &sum, &sync_barrier, n, T](unsigned t) {
-        unsigned s_t = n / T, b_t = n % T;
-
-        if (t < b_t)
-            b_t = ++s_t * t;
-        else
-            b_t += s_t * t;
-
-        unsigned e_t = b_t + s_t;
-
-        unsigned my_sum = 0;
-        for (unsigned i = b_t; i < e_t; ++i)
-            my_sum += v[i];
-
-        sync_barrier.arrive_and_wait(); 
-
-        {
-            static std::mutex sum_mutex;
-            std::scoped_lock lock(sum_mutex);
-            sum += my_sum;
-        }
-    };
-
-    for (unsigned t = 1; t < T; ++t)
-        workers[t - 1] = std::thread(worker_proc, t);
-
-    worker_proc(0);
+    for (size_t t = 1; t < T; ++t)
+        workers[t - 1] = std::thread(subvector, t);
+    subvector(0);
 
     for (auto& worker : workers)
         worker.join();
@@ -278,55 +240,20 @@ unsigned sum_barrier(const unsigned* v, size_t n) {
     return sum;
 }
 
-void to_csv(std::ostream& os, const std::vector<table_row>& v) {
-    os << "Threads,Match,Time (ms),Speedup,Efficiency\n";
+int main(int argc, char* argv[])
+{
 
-    for (size_t i = 0; i < v.size(); ++i) {
-        os << (i + 1) << ","  
-           << v[i].match << ","
-           << v[i].time << ","
-           << v[i].speedup << ","
-           << v[i].efficiency << "\n";
-    }
-}
-
-int main(int argc, char** argv) {
-    set_num_threads_auto();
-    auto V = std::make_unique<unsigned[]>(N);
-    for (size_t i = 0; i < N; ++i)
-        V[i] = i;
-
-    std::pair<sum_ptr, const char*> methods[] = {
-        METHOD_ENTRY(sum),
-        METHOD_ENTRY(sum_omp_reduce),
-        METHOD_ENTRY(sum_round_robin),
-        METHOD_ENTRY(sum_round_robin_aligned),
-        METHOD_ENTRY(sum_seq),
-        METHOD_ENTRY(vector_sum_la),
-        METHOD_ENTRY(sum_spp_cs),
-        METHOD_ENTRY(sum_mutex),
-        METHOD_ENTRY(sum_barrier)
-    };
-
-    for (const auto& [method, name] : methods) {
-        auto results = run_experiment(method);
-        std::string path = "../results/csv/results_" + std::string(name) + ".csv";
-
-        std::filesystem::path dir = std::filesystem::path(path).parent_path();
-        if (!std::filesystem::exists(dir)) {
-            std::filesystem::create_directories(dir);
-        }
-
-        std::ofstream csv_file(path);
-        if (csv_file.is_open()) {
-            to_csv(csv_file, results);
-            std::cout << "Results saved to " << path << ", Time (ms): " << results[0].time * 1000 << " ms\n"; 
-        } else {
-            std::cerr << "Error: Could not open file for writing.\n";
-        }
+    std::vector<table_row> tbr1 = run_experiment(randomize);
+    auto out1 = std::ofstream("randomizer.csv", std::ios_base::out);
+    out1 << "Average,Time,Speedup\n";
+    for (auto t : tbr1) {
+        out1 << t.average << ',' << t.time << ',' << t.speedup << "\n";
     }
 
+    /*std::cout << unsigned(powm(additive_monoid(7u), 5u)) << '\n';
+    std::cout << unsigned(powm(multiplicative_monoid(7u), 5u)) << '\n';
+    std::cout << unsigned(powm(multiplicative_monoid(0xffffffff), 2u)) << '\n';*/
+    
     return 0;
 }
-
-
+parallel_lab/lab2/aphine.cpp at main · RmichFF/parallel_lab
